@@ -380,8 +380,75 @@ public final class Scripts {
         addItemToInventary((short) 126);*/
         
         useItem((short) FORT_GUN);
+        grantTestLoadout(true);
         //ModChanges
         //ModChanges.NewStartItems();
+    }
+
+    /** Adds the complete weapon set in builds whose manifest enables TestLoadout. */
+    public static void grantTestLoadout(boolean equipAK74) {
+        if (Main.main == null) {
+            return;
+        }
+
+        String testLoadout = Main.main.getAppProperty("TestLoadout");
+        if (testLoadout == null || !testLoadout.equalsIgnoreCase("true")) {
+            return;
+        }
+
+        ensureTestInventoryCapacity(7);
+        int requiredMaxWeight = playerWeight + 140;
+        if (playerMaxWeight < requiredMaxWeight) {
+            playerMaxWeight = (short) requiredMaxWeight;
+        }
+
+        if (!searchItem((short) FORT_GUN)) {
+            addItemToInventory(FORT_GUN);
+        }
+        addTestWeapon(AK74_GUN, AK74_MAG, 1);
+        addTestWeapon(OC14_GUN, OC14_MAG, 2);
+        addTestWeapon(L85_GUN, L85_MAG, 3);
+
+        if (playerWeaponsAmmo[0] <= 0) {
+            playerWeaponsAmmo[0] = 12;
+        }
+
+        if (equipAK74) {
+            useItem(AK74_GUN);
+        }
+
+        ensureTestMagazine(AK74_MAG);
+        ensureTestMagazine(OC14_MAG);
+        ensureTestMagazine(L85_MAG);
+    }
+
+    private static void addTestWeapon(short weapon, short magazine, int ammoSlot) {
+        if (!searchItem(weapon)) {
+            addItemToInventory(weapon);
+        }
+        if (playerWeaponsAmmo[ammoSlot] <= 0) {
+            if (!searchItem(magazine)) {
+                addItemToInventory(magazine);
+            }
+            useItem(magazine);
+        }
+    }
+
+    private static void ensureTestMagazine(short magazine) {
+        if (!searchItem(magazine)) {
+            addItemToInventory(magazine);
+        }
+    }
+
+    private static void ensureTestInventoryCapacity(int extraSlots) {
+        int required = inventoryItemsCount + extraSlots;
+        if (required > inventoryItems.length) {
+            short[] expandedInventory = new short[required];
+            for (int i = 0; i < inventoryItemsCount; ++i) {
+                expandedInventory[i] = inventoryItems[i];
+            }
+            inventoryItems = expandedInventory;
+        }
     }
 
     public static void disableLockedDoorIcon() {

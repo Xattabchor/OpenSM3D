@@ -278,6 +278,7 @@ public final class ResourceManager {
                 PlayerHUD.previousLocation = dis.readByte();
 				
                 dis.close();
+                Scripts.grantTestLoadout(false);
             } catch (IOException e) {
                 e.printStackTrace();
             }
