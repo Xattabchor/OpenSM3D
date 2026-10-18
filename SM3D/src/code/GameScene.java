@@ -3,6 +3,7 @@ package code;
 
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.util.Random;
 import javax.microedition.lcdui.Graphics;
 import javax.microedition.m3g.Appearance;
 import javax.microedition.m3g.Background;
@@ -64,6 +65,33 @@ public final class GameScene {
     //ambient intensity [6]
     //background color [7]
     private static int backgroundColor; //todo remove?
+
+    // Some outdoor rooms use a dark background color, so also detect their Sky* background meshes.
+    private static final int OUTDOOR_SKY_COLOR = 0x4A749F;
+    private static final int RAIN_DROP_COUNT = 56;
+    private static final int LIGHTNING_OVERLAY_ROWS = 8;
+    private static final Random weatherRandom = new Random();
+    private static final int[] rainX = new int[RAIN_DROP_COUNT];
+    private static final int[] rainY = new int[RAIN_DROP_COUNT];
+    private static final int[] rainLength = new int[RAIN_DROP_COUNT];
+    private static final int[] rainSpeed = new int[RAIN_DROP_COUNT];
+    private static final int[] rainDriftSpeed = new int[RAIN_DROP_COUNT];
+    private static boolean weatherEnabled;
+    private static long rainUpdateTime;
+    private static Light lightningLight;
+    private static long nextLightningTime = -1L;
+    private static long lightningFlashStartTime = -1L;
+    private static float lightningIntensity;
+    private static Light playerMuzzleFlashLight;
+    private static Light botMuzzleFlashLight;
+    private static long playerMuzzleFlashLightStartTime = -1L;
+    private static long botMuzzleFlashLightStartTime = -1L;
+    private static final long MUZZLE_FLASH_LIGHT_DURATION = 120L;
+    private static final float MUZZLE_FLASH_LIGHT_INTENSITY = 1.6F;
+    private static final float PLAYER_MUZZLE_FLASH_LIGHT_INTENSITY = 2.0F;
+    private static int[] lightningOverlayPixels;
+    private static int lightningOverlayWidth;
+    private static int lightningOverlayRows;
 
     private static byte[] doorsCount = new byte[15];
     private static float[][][] doorSettings = new float[15][5][8];
@@ -897,6 +925,7 @@ public final class GameScene {
     }
 
     private static void prepareObjectArraysForNextRoom() {
+        stopMuzzleFlashLights();
         Mesh[] var0 = new Mesh[32];
         byte[] var1 = new byte[64];
         byte[] var2 = new byte[64];
@@ -977,6 +1006,8 @@ public final class GameScene {
 
             gameWorld.removeChild(ambientLight);
             ambientLight = null;
+            gameWorld.removeChild(lightningLight);
+            lightningLight = null;
             System.gc();
         } catch (Exception var7) {
             var7.printStackTrace();
@@ -1030,6 +1061,108 @@ public final class GameScene {
         }
 
         muzzleFlashSprite.setRenderingEnable(false);
+        ensureMuzzleFlashLights();
+    }
+
+    private static void ensureMuzzleFlashLights() {
+        if(playerMuzzleFlashLight == null) {
+            // The player light must reach nearby walls from the first-person camera.
+            playerMuzzleFlashLight = createMuzzleFlashLight(0.15F, 0.05F);
+        }
+        if(botMuzzleFlashLight == null) {
+            botMuzzleFlashLight = createMuzzleFlashLight(0.8F, 1.4F);
+        }
+    }
+
+    private static Light createMuzzleFlashLight(float linearAttenuation, float quadraticAttenuation) {
+        Light light = new Light();
+        light.setMode(Light.OMNI);
+        light.setColor(0xFFA85C);
+        light.setAttenuation(1.0F, linearAttenuation, quadraticAttenuation);
+        light.setIntensity(0.0F);
+        light.setRenderingEnable(false);
+        gameWorld.addChild(light);
+        return light;
+    }
+
+    public static void triggerPlayerMuzzleFlashLight() {
+        if(camera == null) {
+            return;
+        }
+
+        ensureMuzzleFlashLights();
+        setPlayerMuzzleFlashLightPosition();
+        startMuzzleFlashLight(playerMuzzleFlashLight);
+    }
+
+    private static void setPlayerMuzzleFlashLightPosition() {
+        if(camera == null || playerMuzzleFlashLight == null) {
+            return;
+        }
+
+        // Place the light just right, below, and ahead of the camera at the weapon muzzle.
+        camera.getTransformTo(gameWorld, tmpTrans);
+        tmpTrans.get(tmpTransArr);
+        playerMuzzleFlashLight.setTranslation(
+                tmpTransArr[0] * 0.16F - tmpTransArr[1] * 0.12F - tmpTransArr[2] * 0.48F + tmpTransArr[3],
+                tmpTransArr[4] * 0.16F - tmpTransArr[5] * 0.12F - tmpTransArr[6] * 0.48F + tmpTransArr[7],
+                tmpTransArr[8] * 0.16F - tmpTransArr[9] * 0.12F - tmpTransArr[10] * 0.48F + tmpTransArr[11]
+        );
+    }
+
+    private static void startBotMuzzleFlashLight(float x, float y, float z) {
+        ensureMuzzleFlashLights();
+        botMuzzleFlashLight.setTranslation(x, y, z);
+        startMuzzleFlashLight(botMuzzleFlashLight);
+    }
+
+    private static void startMuzzleFlashLight(Light light) {
+        float intensity;
+        if(light == playerMuzzleFlashLight) {
+            playerMuzzleFlashLightStartTime = gameTimeUnpaused;
+            intensity = PLAYER_MUZZLE_FLASH_LIGHT_INTENSITY;
+        } else {
+            botMuzzleFlashLightStartTime = gameTimeUnpaused;
+            intensity = MUZZLE_FLASH_LIGHT_INTENSITY;
+        }
+        light.setIntensity(intensity);
+        light.setRenderingEnable(true);
+    }
+
+    private static long updateMuzzleFlashLight(Light light, long startTime, float maxIntensity) {
+        if(light == null || startTime < 0L) {
+            return startTime;
+        }
+
+        long elapsed = gameTimeUnpaused - startTime;
+        if(elapsed >= MUZZLE_FLASH_LIGHT_DURATION) {
+            light.setRenderingEnable(false);
+            light.setIntensity(0.0F);
+            return -1L;
+        }
+        if(elapsed > 24L) {
+            float remaining = (float) (MUZZLE_FLASH_LIGHT_DURATION - elapsed) / (float) (MUZZLE_FLASH_LIGHT_DURATION - 24L);
+            light.setIntensity(maxIntensity * remaining);
+        }
+        return startTime;
+    }
+
+    private static void updateMuzzleFlashLights() {
+        playerMuzzleFlashLightStartTime = updateMuzzleFlashLight(playerMuzzleFlashLight, playerMuzzleFlashLightStartTime, PLAYER_MUZZLE_FLASH_LIGHT_INTENSITY);
+        botMuzzleFlashLightStartTime = updateMuzzleFlashLight(botMuzzleFlashLight, botMuzzleFlashLightStartTime, MUZZLE_FLASH_LIGHT_INTENSITY);
+    }
+
+    private static void stopMuzzleFlashLights() {
+        if(playerMuzzleFlashLight != null) {
+            playerMuzzleFlashLight.setRenderingEnable(false);
+            playerMuzzleFlashLight.setIntensity(0.0F);
+        }
+        if(botMuzzleFlashLight != null) {
+            botMuzzleFlashLight.setRenderingEnable(false);
+            botMuzzleFlashLight.setIntensity(0.0F);
+        }
+        playerMuzzleFlashLightStartTime = -1L;
+        botMuzzleFlashLightStartTime = -1L;
     }
 
     private static void loadPlayerModel() {
@@ -1105,7 +1238,175 @@ public final class GameScene {
             //todo отключать очистку фона если мы в здании
         }
         gameWorld.getBackground().setColor(backgroundColor);
+        configureWeatherForRoom(roomId);
 
+    }
+
+    private static boolean isOutdoorRoom(int roomId) {
+        if((backgroundColor & 0xFFFFFF) == OUTDOOR_SKY_COLOR) return true;
+
+        for(int i = 0; i < bckMeshesCount[roomId]; i++) {
+            int modelId = (int) bckMeshSettings[roomId][i][4];
+            if(modelId >= 0 && modelId < objectModelName.length) {
+                String modelName = objectModelName[modelId];
+                if(modelName != null && modelName.indexOf("Sky") != -1) return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void configureWeatherForRoom(int roomId) {
+        boolean wasWeatherEnabled = weatherEnabled;
+        weatherEnabled = isOutdoorRoom(roomId);
+
+        if(weatherEnabled) {
+            if(!wasWeatherEnabled) {
+                resetRainDrops();
+                lightningFlashStartTime = -1L;
+                lightningIntensity = 0.0F;
+                nextLightningTime = gameTimeUnpaused + 7000L + weatherRandom.nextInt(10000);
+            }
+
+            if(lightningLight == null) {
+                lightningLight = new Light();
+                lightningLight.setMode(Light.AMBIENT);
+                lightningLight.setColor(0xEEF5FF);
+                lightningLight.setIntensity(0.0F);
+                lightningLight.setRenderingEnable(false);
+                gameWorld.addChild(lightningLight);
+            }
+        } else {
+            nextLightningTime = -1L;
+            lightningFlashStartTime = -1L;
+            lightningIntensity = 0.0F;
+            if(lightningLight != null) {
+                lightningLight.setIntensity(0.0F);
+                lightningLight.setRenderingEnable(false);
+            }
+        }
+    }
+
+    private static void resetRainDrops() {
+        int width = screenWidth > 0 ? screenWidth : 1;
+        int height = screenHeight > 0 ? screenHeight : 1;
+
+        for(int i = 0; i < RAIN_DROP_COUNT; i++) {
+            rainLength[i] = 8 + weatherRandom.nextInt(7);
+            rainX[i] = weatherRandom.nextInt(width);
+            rainY[i] = weatherRandom.nextInt(height + rainLength[i]) - rainLength[i];
+            rainSpeed[i] = 170 + weatherRandom.nextInt(111);
+            rainDriftSpeed[i] = 18 + weatherRandom.nextInt(28);
+        }
+
+        rainUpdateTime = gameTimeUnpaused;
+    }
+
+    private static void updateWeatherEffects() {
+        if(!weatherEnabled) return;
+
+        long now = gameTimeUnpaused;
+        long elapsed = now - rainUpdateTime;
+        if(elapsed < 0L) elapsed = 0L;
+        if(elapsed > 250L) elapsed = 250L;
+        rainUpdateTime = now;
+
+        if(elapsed > 0L) {
+            int width = screenWidth > 0 ? screenWidth : 1;
+            int height = screenHeight > 0 ? screenHeight : 1;
+
+            for(int i = 0; i < RAIN_DROP_COUNT; i++) {
+                rainX[i] -= (int) (elapsed * rainDriftSpeed[i] / 1000L);
+                rainY[i] += (int) (elapsed * rainSpeed[i] / 1000L);
+
+                if(rainX[i] < -rainLength[i]) rainX[i] += width + rainLength[i];
+                if(rainY[i] > height) {
+                    rainX[i] = weatherRandom.nextInt(width);
+                    rainY[i] = -rainLength[i] - weatherRandom.nextInt(height / 4 + 1);
+                }
+            }
+        }
+
+        if(nextLightningTime < 0L) {
+            nextLightningTime = now + 7000L + weatherRandom.nextInt(10000);
+        }
+        if(lightningFlashStartTime < 0L && now >= nextLightningTime) {
+            lightningFlashStartTime = now;
+            nextLightningTime = now + 9000L + weatherRandom.nextInt(13000);
+        }
+
+        if(lightningFlashStartTime >= 0L) {
+            long flashTime = now - lightningFlashStartTime;
+            if(flashTime < 120L) {
+                lightningIntensity = 1.0F - (float) flashTime / 120.0F;
+            } else if(flashTime < 180L) {
+                lightningIntensity = 0.0F;
+            } else if(flashTime < 275L) {
+                lightningIntensity = 0.65F * (1.0F - (float) (flashTime - 180L) / 95.0F);
+            } else {
+                lightningFlashStartTime = -1L;
+                lightningIntensity = 0.0F;
+            }
+        }
+
+        if(lightningLight != null) {
+            lightningLight.setIntensity(lightningIntensity);
+            lightningLight.setRenderingEnable(lightningIntensity > 0.0F);
+        }
+
+        Background background = gameWorld.getBackground();
+        if(background != null) {
+            int flashAmount = (int) (lightningIntensity * 220.0F);
+            background.setColor(blendColors(backgroundColor, 0xF5F8FF, flashAmount));
+        }
+    }
+
+    private static int blendColors(int baseColor, int flashColor, int amount) {
+        if(amount <= 0) return baseColor;
+        if(amount > 255) amount = 255;
+
+        int inverseAmount = 255 - amount;
+        int red = (((baseColor >> 16) & 255) * inverseAmount + ((flashColor >> 16) & 255) * amount) / 255;
+        int green = (((baseColor >> 8) & 255) * inverseAmount + ((flashColor >> 8) & 255) * amount) / 255;
+        int blue = ((baseColor & 255) * inverseAmount + (flashColor & 255) * amount) / 255;
+        return red << 16 | green << 8 | blue;
+    }
+
+    private static void drawWeatherEffects(Graphics graphics) {
+        if(!weatherEnabled) return;
+
+        drawLightningOverlay(graphics);
+        graphics.setColor(lightningIntensity > 0.25F ? 0xD5E3F2 : 0x8FA7B8);
+
+        for(int i = 0; i < RAIN_DROP_COUNT; i++) {
+            graphics.drawLine(rainX[i], rainY[i], rainX[i] - 2, rainY[i] + rainLength[i]);
+        }
+    }
+
+    private static void drawLightningOverlay(Graphics graphics) {
+        if(lightningIntensity <= 0.0F) return;
+
+        int width = screenWidth;
+        int height = screenHeight;
+        if(width <= 0 || height <= 0) return;
+
+        int rows = height < LIGHTNING_OVERLAY_ROWS ? height : LIGHTNING_OVERLAY_ROWS;
+        if(lightningOverlayPixels == null || lightningOverlayWidth != width || lightningOverlayRows != rows) {
+            lightningOverlayPixels = new int[width * rows];
+            lightningOverlayWidth = width;
+            lightningOverlayRows = rows;
+        }
+
+        int alpha = (int) (lightningIntensity * 88.0F);
+        int pixel = alpha << 24 | 0x00EAF3FF;
+        for(int i = 0; i < lightningOverlayPixels.length; i++) {
+            lightningOverlayPixels[i] = pixel;
+        }
+
+        for(int y = 0; y < height; y += rows) {
+            int bandHeight = height - y < rows ? height - y : rows;
+            graphics.drawRGB(lightningOverlayPixels, 0, width, 0, y, width, bandHeight, true);
+        }
     }
 
     private static void setRoomLights(int roomId) {
@@ -1269,6 +1570,7 @@ public final class GameScene {
         bckSpritesAnimEnabled = new boolean[32];
         lastTerrainDamageTime = (int) gameTimeUnpaused;
         shootShakeActive = false;
+        stopMuzzleFlashLights();
         aimAssistActive = false;
         doorUnlocked = new boolean[doorsCount[currentRoom]];
         doorIsUnderCursor = new boolean[5];
@@ -1961,6 +2263,7 @@ public final class GameScene {
                 tmpTrans.get(tmpTransArr);
                 muzzleFlashSprite.setTranslation(tmpTransArr[3], tmpTransArr[7], tmpTransArr[11]);
                 muzzleFlashSprite.setRenderingEnable(true);
+                startBotMuzzleFlashLight(tmpTransArr[3], tmpTransArr[7], tmpTransArr[11]);
             } else {
                 muzzleFlashSprite.setRenderingEnable(false);
             }
@@ -2378,6 +2681,13 @@ public final class GameScene {
         gameWorld.removeChild(ambientLight);
         ambientLight = null;
         System.gc();
+        gameWorld.removeChild(lightningLight);
+        lightningLight = null;
+        weatherEnabled = false;
+        nextLightningTime = -1L;
+        lightningFlashStartTime = -1L;
+        lightningIntensity = 0.0F;
+        lightningOverlayPixels = null;
         notInRoom = true;
     }
 
@@ -2396,6 +2706,10 @@ public final class GameScene {
     public static void renderWorld(Graphics graphics) {
         try {
             if(currentGameState != -2 && currentGameState != 0 && currentGameState != 13 && currentGameState != 14) {
+                updateWeatherEffects();
+                if(playerMuzzleFlashLightStartTime >= 0L) {
+                    setPlayerMuzzleFlashLightPosition();
+                }
                 graphics3D.bindTarget(graphics, true, Graphics3D.OVERWRITE);
                 
                 //9.01.25 Меняем размер области отрисовки при прицеливании
@@ -2416,6 +2730,8 @@ public final class GameScene {
                 
                 graphics3D.render(gameWorld);
                 graphics3D.releaseTarget();
+                updateMuzzleFlashLights();
+                drawWeatherEffects(graphics);
                 
                 if(fpsCounterEnabled==1) {
                     int fps = MathUtils.calcFps();

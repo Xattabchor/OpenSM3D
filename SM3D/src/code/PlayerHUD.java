@@ -17,6 +17,9 @@ public final class PlayerHUD {
     private static Image damageImage;
     public static Image weaponFireImage;
     public static Image antiradHUDImage;
+    private static final int WEAPON_FLASH_GLOW_SIZE = 40;
+    private static final int WEAPON_FLASH_GLOW_RADIUS = WEAPON_FLASH_GLOW_SIZE / 2;
+    private static final int[] weaponFlashGlowPixels = createWeaponFlashGlowPixels();
     public static boolean HUDImagesLoaded = false;
     
     //Координаты локаций на глобальной карте в ПДА
@@ -191,6 +194,26 @@ public final class PlayerHUD {
         }
     }
 
+    private static int[] createWeaponFlashGlowPixels() {
+        int[] pixels = new int[WEAPON_FLASH_GLOW_SIZE * WEAPON_FLASH_GLOW_SIZE];
+        int radiusSquared = WEAPON_FLASH_GLOW_RADIUS * WEAPON_FLASH_GLOW_RADIUS;
+        int denominator = radiusSquared * radiusSquared;
+
+        for(int y = 0; y < WEAPON_FLASH_GLOW_SIZE; y++) {
+            int dy = y - WEAPON_FLASH_GLOW_RADIUS;
+            for(int x = 0; x < WEAPON_FLASH_GLOW_SIZE; x++) {
+                int dx = x - WEAPON_FLASH_GLOW_RADIUS;
+                int distanceSquared = dx * dx + dy * dy;
+                if(distanceSquared < radiusSquared) {
+                    int falloff = radiusSquared - distanceSquared;
+                    int alpha = falloff * falloff * 88 / denominator;
+                    pixels[y * WEAPON_FLASH_GLOW_SIZE + x] = alpha << 24 | 0x00FFA85C;
+                }
+            }
+        }
+        return pixels;
+    }
+
     //  ОРУЖЕЙНАЯ СИСТЕМА
     //Сама пушка
     private static void drawWeapon(byte weapId) {
@@ -215,7 +238,13 @@ public final class PlayerHUD {
                     var5 = 20;
             }
 
-            graphics.drawImage(weaponFireImage, x + var4 - (weaponFireImage.getWidth() >> 1), y + var5 - (weaponFireImage.getHeight() >> 1), 0);
+            int muzzleX = x + var4;
+            int muzzleY = y + var5;
+            graphics.drawRGB(weaponFlashGlowPixels, 0, WEAPON_FLASH_GLOW_SIZE,
+                    muzzleX - WEAPON_FLASH_GLOW_RADIUS, muzzleY - WEAPON_FLASH_GLOW_RADIUS,
+                    WEAPON_FLASH_GLOW_SIZE, WEAPON_FLASH_GLOW_SIZE, true);
+            graphics.drawImage(weaponFireImage, muzzleX - (weaponFireImage.getWidth() >> 1),
+                    muzzleY - (weaponFireImage.getHeight() >> 1), 0);
             Scripts.weaponFireflareHidden = false;
         }
 
