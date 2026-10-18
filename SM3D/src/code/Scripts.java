@@ -220,6 +220,8 @@ public final class Scripts {
 
     private static boolean botUnderCursor;
     private static boolean gunSoundPlayed;
+    private static long nextAutomaticShotTime = -1L;
+    private static byte automaticShotWeapon = -1;
     public static boolean gunSwitchInProcess;
     public static short timeToSwitchWeapon = 1000;
     public static int switchingGunTimePassed;
@@ -1589,6 +1591,21 @@ public final class Scripts {
         }
     }
 
+    private static int getWeaponAccuracy(byte gun) {
+        switch(gun) {
+            case 0:
+                return 60;
+            case 1: // AK-74
+                return 55;
+            case 2: // OC-14
+                return 65;
+            case 3: // L85
+                return 75;
+            default:
+                return 0;
+        }
+    }
+
     private static void shoot(byte gun) {
         if (!gunSwitchInProcess && !gunReloadInProcess) {
             if (playerWeaponsAmmo[gun] > 0 || gun == 0) {
@@ -1604,7 +1621,6 @@ public final class Scripts {
                         //restore sounds
                         soundId = 5;
                         //restore sounds
-                        playerAccuracy = 60; //Точность персонажа 60%
                         --playerWeaponsAmmo[0]; //Убавить боезапас на единицу
                         if (playerWeaponsAmmo[0] < 1) //Если патронов в магазине нет
                         {
@@ -1612,22 +1628,24 @@ public final class Scripts {
                         }
                         break;
                     case 1:
-                        playerAccuracy = 40;
                         --playerWeaponsAmmo[1];
                         break;
                     case 2:
-                        playerAccuracy = 50;
                         --playerWeaponsAmmo[2];
                         break;
                     case 3:
-                        playerAccuracy = 60;
                         --playerWeaponsAmmo[3];
                 }
 
                 //restore sounds
                 SoundAndVibro.playSound(soundId);
                 //restore sounds
-                if (botUnderCursor && MathUtils.getRandomNumber(100) <= playerAccuracy) //Если ты всё-таки попал 
+                int hitChance = getWeaponAccuracy(gun);
+                if(gun != 0) {
+                    hitChance += playerAccuracy - 50;
+                }
+                hitChance = Math.max(0, Math.min(95, hitChance));
+                if(botUnderCursor && MathUtils.getRandomNumber(100) <= hitChance) //Если ты всё-таки попал
                 {
                     killBot();
                 }
@@ -1658,6 +1676,66 @@ public final class Scripts {
         finishCurrentTask();
     }
 
+    private static int getAutomaticFireInterval(byte gun) {
+        switch(gun) {
+            case 1: // AK-74: roughly 9 shots per second
+                return 110;
+            case 2: // OC-14: roughly 10 shots per second
+                return 100;
+            case 3: // L85: roughly 11 shots per second
+                return 90;
+            default:
+                return 0;
+        }
+    }
+
+    private static void resetAutomaticFire() {
+        nextAutomaticShotTime = -1L;
+        automaticShotWeapon = -1;
+    }
+
+    private static void checkPlayerFire() {
+        boolean fireHeld = Keys.fire || Keys.num5;
+        if(!fireHeld) {
+            resetAutomaticFire();
+            return;
+        }
+
+        if(GameScene.getOpenDoorIdUnderCursor()) {
+            Keys.fire = false;
+            Keys.num5 = false;
+            resetAutomaticFire();
+            openDoor(GameScene.openDoorIdUnderCursor);
+            return;
+        }
+
+        if(GameScene.getActiveObjectIdUnderCursor()) {
+            Keys.fire = false;
+            Keys.num5 = false;
+            resetAutomaticFire();
+            interactionWith(GameScene.activableObjIdUnderCursor);
+            return;
+        }
+
+        int fireInterval = getAutomaticFireInterval(playerActiveWeapon);
+        if(fireInterval > 0) {
+            if(automaticShotWeapon != playerActiveWeapon) {
+                automaticShotWeapon = playerActiveWeapon;
+                nextAutomaticShotTime = GameScene.gameTimeUnpaused;
+            }
+            if(GameScene.gameTimeUnpaused >= nextAutomaticShotTime) {
+                shoot(playerActiveWeapon);
+                nextAutomaticShotTime = GameScene.gameTimeUnpaused + fireInterval;
+            }
+            return;
+        }
+
+        Keys.fire = false;
+        Keys.num5 = false;
+        resetAutomaticFire();
+        shoot(playerActiveWeapon);
+    }
+
     private static void playerControlCheck() {
         if (GameScene.currentGameState != 1 && GameScene.currentGameState != 4 && GameScene.currentGameState != 11 && !endingCutscene && GameScene.currentGameState != 13 && GameScene.currentGameState != 0 && GameScene.currentGameState != -2) {
             switch (GameScene.currentGameState) {
@@ -1670,17 +1748,7 @@ public final class Scripts {
                     Keys.rightAccelerate = System.currentTimeMillis() - Keys.righOr6PressTime >= 200L && Keys.righOr6PressTime != -1L;
                     Keys.downAccelerate = System.currentTimeMillis() - Keys.downOr8PressTime >= 200L && Keys.downOr8PressTime != -1L;
                     Keys.upAccelerate = System.currentTimeMillis() - Keys.upOr2PressTime >= 200L && Keys.upOr2PressTime != -1L;
-                    if (Keys.fire || Keys.num5) {
-                        Keys.fire = false;
-                        Keys.num5 = false;
-                        if (GameScene.getOpenDoorIdUnderCursor()) {
-                            openDoor(GameScene.openDoorIdUnderCursor);
-                        } else if (!GameScene.getActiveObjectIdUnderCursor()) {
-                            shoot(playerActiveWeapon);
-                        } else {
-                            interactionWith(GameScene.activableObjIdUnderCursor);
-                        }
-                    }
+                    checkPlayerFire();
 
                     if (Keys.left || Keys.num4) {
                         GameScene.TurnLeftTheCamera();
