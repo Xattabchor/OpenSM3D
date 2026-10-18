@@ -82,6 +82,12 @@ public final class GameScene {
     private static long nextLightningTime = -1L;
     private static long lightningFlashStartTime = -1L;
     private static float lightningIntensity;
+    private static Light playerMuzzleFlashLight;
+    private static Light botMuzzleFlashLight;
+    private static long playerMuzzleFlashLightStartTime = -1L;
+    private static long botMuzzleFlashLightStartTime = -1L;
+    private static final long MUZZLE_FLASH_LIGHT_DURATION = 120L;
+    private static final float MUZZLE_FLASH_LIGHT_INTENSITY = 1.6F;
     private static int[] lightningOverlayPixels;
     private static int lightningOverlayWidth;
     private static int lightningOverlayRows;
@@ -918,6 +924,7 @@ public final class GameScene {
     }
 
     private static void prepareObjectArraysForNextRoom() {
+        stopMuzzleFlashLights();
         Mesh[] var0 = new Mesh[32];
         byte[] var1 = new byte[64];
         byte[] var2 = new byte[64];
@@ -1053,6 +1060,96 @@ public final class GameScene {
         }
 
         muzzleFlashSprite.setRenderingEnable(false);
+        ensureMuzzleFlashLights();
+    }
+
+    private static void ensureMuzzleFlashLights() {
+        if(playerMuzzleFlashLight == null) {
+            playerMuzzleFlashLight = createMuzzleFlashLight();
+        }
+        if(botMuzzleFlashLight == null) {
+            botMuzzleFlashLight = createMuzzleFlashLight();
+        }
+    }
+
+    private static Light createMuzzleFlashLight() {
+        Light light = new Light();
+        light.setMode(Light.OMNI);
+        light.setColor(0xFFA85C);
+        light.setAttenuation(1.0F, 0.8F, 1.4F);
+        light.setIntensity(0.0F);
+        light.setRenderingEnable(false);
+        gameWorld.addChild(light);
+        return light;
+    }
+
+    public static void triggerPlayerMuzzleFlashLight() {
+        if(camera == null) {
+            return;
+        }
+
+        ensureMuzzleFlashLights();
+        // Place the light just right, below, and ahead of the camera at the weapon muzzle.
+        camera.getTransformTo(gameWorld, tmpTrans);
+        tmpTrans.get(tmpTransArr);
+        startMuzzleFlashLight(
+                playerMuzzleFlashLight,
+                tmpTransArr[0] * 0.16F - tmpTransArr[1] * 0.12F - tmpTransArr[2] * 0.48F + tmpTransArr[3],
+                tmpTransArr[4] * 0.16F - tmpTransArr[5] * 0.12F - tmpTransArr[6] * 0.48F + tmpTransArr[7],
+                tmpTransArr[8] * 0.16F - tmpTransArr[9] * 0.12F - tmpTransArr[10] * 0.48F + tmpTransArr[11]
+        );
+    }
+
+    private static void startBotMuzzleFlashLight(float x, float y, float z) {
+        ensureMuzzleFlashLights();
+        startMuzzleFlashLight(botMuzzleFlashLight, x, y, z);
+    }
+
+    private static void startMuzzleFlashLight(Light light, float x, float y, float z) {
+        light.setTranslation(x, y, z);
+        if(light == playerMuzzleFlashLight) {
+            playerMuzzleFlashLightStartTime = gameTimeUnpaused;
+        } else {
+            botMuzzleFlashLightStartTime = gameTimeUnpaused;
+        }
+        light.setIntensity(MUZZLE_FLASH_LIGHT_INTENSITY);
+        light.setRenderingEnable(true);
+    }
+
+    private static long updateMuzzleFlashLight(Light light, long startTime) {
+        if(light == null || startTime < 0L) {
+            return startTime;
+        }
+
+        long elapsed = gameTimeUnpaused - startTime;
+        if(elapsed >= MUZZLE_FLASH_LIGHT_DURATION) {
+            light.setRenderingEnable(false);
+            light.setIntensity(0.0F);
+            return -1L;
+        }
+        if(elapsed > 24L) {
+            float remaining = (float) (MUZZLE_FLASH_LIGHT_DURATION - elapsed) / (float) (MUZZLE_FLASH_LIGHT_DURATION - 24L);
+            light.setIntensity(MUZZLE_FLASH_LIGHT_INTENSITY * remaining);
+        }
+        return startTime;
+    }
+
+    private static void updateMuzzleFlashLights() {
+        playerMuzzleFlashLightStartTime = updateMuzzleFlashLight(playerMuzzleFlashLight, playerMuzzleFlashLightStartTime);
+        botMuzzleFlashLightStartTime = updateMuzzleFlashLight(botMuzzleFlashLight, botMuzzleFlashLightStartTime);
+    }
+
+    private static void stopMuzzleFlashLights() {
+        if(playerMuzzleFlashLight != null) {
+            playerMuzzleFlashLight.setRenderingEnable(false);
+            playerMuzzleFlashLight.setIntensity(0.0F);
+        }
+        if(botMuzzleFlashLight != null) {
+            botMuzzleFlashLight.setRenderingEnable(false);
+            botMuzzleFlashLight.setIntensity(0.0F);
+        }
+        playerMuzzleFlashLightStartTime = -1L;
+        botMuzzleFlashLightStartTime = -1L;
     }
 
     private static void loadPlayerModel() {
@@ -1460,6 +1557,7 @@ public final class GameScene {
         bckSpritesAnimEnabled = new boolean[32];
         lastTerrainDamageTime = (int) gameTimeUnpaused;
         shootShakeActive = false;
+        stopMuzzleFlashLights();
         aimAssistActive = false;
         doorUnlocked = new boolean[doorsCount[currentRoom]];
         doorIsUnderCursor = new boolean[5];
@@ -2152,6 +2250,7 @@ public final class GameScene {
                 tmpTrans.get(tmpTransArr);
                 muzzleFlashSprite.setTranslation(tmpTransArr[3], tmpTransArr[7], tmpTransArr[11]);
                 muzzleFlashSprite.setRenderingEnable(true);
+                startBotMuzzleFlashLight(tmpTransArr[3], tmpTransArr[7], tmpTransArr[11]);
             } else {
                 muzzleFlashSprite.setRenderingEnable(false);
             }
@@ -2595,6 +2694,7 @@ public final class GameScene {
         try {
             if(currentGameState != -2 && currentGameState != 0 && currentGameState != 13 && currentGameState != 14) {
                 updateWeatherEffects();
+                updateMuzzleFlashLights();
                 graphics3D.bindTarget(graphics, true, Graphics3D.OVERWRITE);
                 
                 //9.01.25 Меняем размер области отрисовки при прицеливании

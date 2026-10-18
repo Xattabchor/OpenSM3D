@@ -1595,6 +1595,7 @@ public final class Scripts {
                 weaponFireflareHidden = true;
                 GameScene.shootStartTime = (int) GameScene.gameTimeUnpaused;
                 GameScene.shootShakeActive = true;
+                GameScene.triggerPlayerMuzzleFlashLight();
                 //restore sounds
                 int soundId = 4;
                 //restore sounds
