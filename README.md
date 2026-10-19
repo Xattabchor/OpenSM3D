@@ -27,6 +27,17 @@ Open Stalker Mobile 3D a.k.a. OpenSM3D представляет собой де�
   * texsky2 (сумеречное небо) — небольшой дождь
   * texsky1 (ясное небо) — без осадков
 
+Сборка JAR:
+
+```sh
+JAVA_HOME=/path/to/jdk8 \
+WTK_LIB=/path/to/wtk/lib \
+PROGUARD_JAR=/path/to/proguard.jar \
+sh SM3D/build.sh
+```
+
+Исходники лежат в UTF-8, поэтому `javac` вызывается с `-encoding UTF-8`. Без этого кириллица в строковых константах (`ModChanges.gameAlphabet`, `gameAlphabetRu`) превращается в символы замены и весь текст в игре отображается мусором.
+
 
 
 
