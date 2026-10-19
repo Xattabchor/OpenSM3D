@@ -1014,8 +1014,10 @@ public final class GameScene {
 
             gameWorld.removeChild(ambientLight);
             ambientLight = null;
-            gameWorld.removeChild(lightningLight);
-            lightningLight = null;
+            if(lightningLight != null) {
+                gameWorld.removeChild(lightningLight);
+                lightningLight = null;
+            }
             System.gc();
         } catch (Exception var7) {
             var7.printStackTrace();
@@ -2716,8 +2718,10 @@ public final class GameScene {
         gameWorld.removeChild(ambientLight);
         ambientLight = null;
         System.gc();
-        gameWorld.removeChild(lightningLight);
-        lightningLight = null;
+        if(lightningLight != null) {
+            gameWorld.removeChild(lightningLight);
+            lightningLight = null;
+        }
         weatherMode = WEATHER_NONE;
         activeRainDropCount = 0;
         rainUpdateTime = 0L;
