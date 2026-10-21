@@ -9,6 +9,7 @@ import javax.microedition.m3g.Light;
 import javax.microedition.m3g.Loader;
 import javax.microedition.m3g.Material;
 import javax.microedition.m3g.Mesh;
+import javax.microedition.m3g.Node;
 import javax.microedition.m3g.Object3D;
 import javax.microedition.m3g.World;
 
@@ -17,6 +18,8 @@ public final class Bot //Персонажи, модели, освещение, �
 	//Вид оружия для каждого врага, от 0 до 3. 
 	//Сами вероятности см. в NPCShootPlayer
 	public static byte[] enemyWeaponType = new byte[10];
+	//Позы "лежит убитым" (время анимации * 100): в них голову не крутим
+	public static final int[] DEAD_POSE_ANIM_TIMES = {1900, 2000};
 	//Тип каждого добавленного на уровень противника (от 0 до 12)
 	//По нему вычисляется количество получаемого опыта за убийство
 	private static final byte[] botTypes = new byte[10];
@@ -78,6 +81,13 @@ public final class Bot //Персонажи, модели, освещение, �
 		
 		setBotType(botType, botId);
 		setBotAppearance(botType, botId);
+	}
+
+	public static boolean isDeadPoseAnimTime(int time) {
+		for(int i = 0; i < DEAD_POSE_ANIM_TIMES.length; ++i) {
+			if(DEAD_POSE_ANIM_TIMES[i] == time) return true;
+		}
+		return false;
 	}
 
 	private static void setBotType(int botType, int botId) {
@@ -151,20 +161,36 @@ public final class Bot //Персонажи, модели, освещение, �
 			GameScene.staticBotMdlGroup[botId] = botMdlCopy;
 		}
 
-		GameScene.staticBotMdlGroup[botId].setRenderingEnable(true);
-		GameScene.gameWorld.addChild(GameScene.staticBotMdlGroup[botId]);
-		
+		Group botGroup = GameScene.staticBotMdlGroup[botId];
+		if(botGroup == null) {
+			return;
+		}
+
+		botGroup.setRenderingEnable(true);
+		GameScene.gameWorld.addChild(botGroup);
+
+		//Группа скопирована с roomBotGroups[0], а там уже висит оружие
+		//бота из комнаты. Убираем его, иначе у статичного NPC оказывается
+		//два и более ствола в руках.
+		removeStaticBotWeapons(botGroup);
+
 		byte weaponId = GameScene.objectStaticBotWeaponId[persId];
 		if(weaponId != 0) {
 			Mesh weaponMesh = (Mesh) GameScene.persWorld.find(weaponId);
-			Mesh weaponCopy = (Mesh) weaponMesh.duplicate();
-			GameScene.staticBotMdlGroup[botId].addChild(weaponCopy);
+			if(weaponMesh != null) {
+				Mesh weaponCopy = (Mesh) weaponMesh.duplicate();
+				botGroup.addChild(weaponCopy);
+			}
 		}
 
-		setStaticBotAppearance(botId, persId);
-		
 		int time = GameScene.objectStaticBotAnimTime[persId] * 100;
-		GameScene.staticBotMdlGroup[botId].animate(time);
+		GameScene.staticBotAnimTime[botId] = time;
+		botGroup.animate(time);
+
+		setStaticBotAppearance(botId, persId);
+
+		//Голову цепляем после animate(): её трансформ уже содержит нужную позу
+		BotHeadLookAt.attachHead(botId, botGroup);
 	}
 
 	private static void setStaticBotAppearance(int botId, int textureId) {
@@ -182,7 +208,48 @@ public final class Bot //Персонажи, модели, освещение, �
 
 		for(int i = 0; i < 12; i++) {
 			Mesh bodyPart = (Mesh) GameScene.staticBotMdlGroup[botId].find(i + 1);
-			bodyPart.setAppearance(0, ap);
+			if(bodyPart != null) bodyPart.setAppearance(0, ap);
 		}
+
+		setStaticBotWeaponAppearance(GameScene.staticBotMdlGroup[botId]);
+	}
+
+	//Оружие статичных NPC оставалось с дефолтным материалом и выглядело
+	//тёмным/неосвещённым. Даём ему собственную текстуру и материал.
+	private static void setStaticBotWeaponAppearance(Group botGroup) {
+		Appearance ap = new Appearance();
+		ap.setTexture(0, ResourceLoader.getTexture("texobj2.png"));
+
+		CompositingMode cm = new CompositingMode();
+		cm.setBlending(CompositingMode.REPLACE);
+		ap.setCompositingMode(cm);
+
+		Material mat = new Material();
+		ap.setMaterial(mat);
+
+		for(int i = 0; i < botGroup.getChildCount(); ++i) {
+			Object3D child = botGroup.getChild(i);
+			if(!(child instanceof Mesh)) continue;
+			if(!isWeaponUserId(child.getUserID())) continue;
+
+			Mesh weapon = (Mesh) child;
+			for(int submesh = 0; submesh < weapon.getSubmeshCount(); ++submesh) {
+				weapon.setAppearance(submesh, ap);
+			}
+		}
+	}
+
+	private static void removeStaticBotWeapons(Group botGroup) {
+		for(int i = botGroup.getChildCount() - 1; i >= 0; --i) {
+			Object3D child = botGroup.getChild(i);
+			if(child instanceof Mesh && isWeaponUserId(child.getUserID())) {
+				botGroup.removeChild((Node) child);
+			}
+		}
+	}
+
+	//userID оружия в pers.m3g: 22..24 (25 — рюкзак)
+	private static boolean isWeaponUserId(int userId) {
+		return userId >= 22 && userId <= 24;
 	}
 }
