@@ -44,7 +44,7 @@ public final class GameScene {
     
     //Camera
     public static Camera camera;
-    private static float[] cameraPos = new float[3];
+    static float[] cameraPos = new float[3];
     private static float[] prevCameraPos = new float[3]; //Used in cutscenes?
     public static int currentDoorId;
     private static float cameraXRot, cameraYRot;
@@ -191,6 +191,10 @@ public final class GameScene {
     private static byte[] activableObjsCount = new byte[15];
     public static Mesh[] activableObjMeshes;
     public static Group[] staticBotMdlGroup;
+    //время анимации, с которым выставлен статичный NPC (для позы "убит")
+    public static int[] staticBotAnimTime;
+    //поворот тела статичного NPC вокруг Y, нужен для поворота головы
+    public static float[] staticBotYAngle;
     private static float[][][] activableObjSettings = new float[15][10][8];
     //[roomId][obj][settings]
     //x [0]
@@ -297,7 +301,7 @@ public final class GameScene {
     public static long currentTime;
     public static long gameTime; //unused todo remove?
     public static long gameTimeUnpaused; //prev renderTimeOnly3D
-    private static int tickDuration;
+    static int tickDuration;
    //Возвращаю старый дебаггер
     private static int fpsCounterEnabled;
 	
@@ -335,6 +339,8 @@ public final class GameScene {
         roomLights = new Light[32];
         bckSprites = new Sprite3D[32];
         staticBotMdlGroup = new Group[10];
+        staticBotAnimTime = new int[10];
+        staticBotYAngle = new float[10];
         roomBotGroups = new Group[10];
         bckSpritesAnimEnabled = new boolean[32];
         roomBckMeshesMdlId = new byte[32];
@@ -1010,6 +1016,9 @@ public final class GameScene {
             for(var4 = 0; var4 < 10; ++var4) {
                 gameWorld.removeChild(staticBotMdlGroup[var4]);
                 staticBotMdlGroup[var4] = null;
+                staticBotAnimTime[var4] = 0;
+                staticBotYAngle[var4] = 0.0F;
+                BotHeadLookAt.detach(var4);
             }
 
             gameWorld.removeChild(ambientLight);
@@ -1571,6 +1580,7 @@ public final class GameScene {
                 staticBotMdlGroup[i].preRotate(rotZ, 0.0F, 0.0F, 1.0F);
                 staticBotMdlGroup[i].preRotate(rotY, 0.0F, 1.0F, 0.0F);
                 staticBotMdlGroup[i].setTranslation(x, y, z);
+                staticBotYAngle[i] = rotY;
             }
         }
     }
@@ -2709,6 +2719,9 @@ public final class GameScene {
         for(number = 0; number < 10; ++number) {
             gameWorld.removeChild(staticBotMdlGroup[number]);
             staticBotMdlGroup[number] = null;
+            staticBotAnimTime[number] = 0;
+            staticBotYAngle[number] = 0.0F;
+            BotHeadLookAt.detach(number);
         }
 
         System.gc();
@@ -2744,6 +2757,23 @@ public final class GameScene {
         //
     }
 
+    //Статичные NPC поворачивают голову к игроку, когда прицел наведён на них.
+    //Статичные NPC лежат в тех же массивах, что и активируемые объекты, поэтому
+    //индексы совпадают, а углы посчитаны в setActivableObjAngles() при входе в комнату.
+    private static void updateStaticBotsHeadLookAt() {
+        for(int i = 0; i < staticBotMdlGroup.length; ++i) {
+            if(staticBotMdlGroup[i] == null) continue;
+            if(Bot.isDeadPoseAnimTime(staticBotAnimTime[i])) continue;
+
+            boolean underCursor = cameraYRot > activObjYAngle[i] - 5.0F
+                    && cameraYRot < activObjYAngle[i] + 5.0F
+                    && cameraXRot >= activObjMinXAngle[i]
+                    && cameraXRot <= activObjMaxXAngle[i];
+
+            BotHeadLookAt.update(i, staticBotMdlGroup[i], staticBotYAngle[i], underCursor, tickDuration);
+        }
+    }
+
     public static void renderWorld(Graphics graphics) {
         try {
             if(currentGameState != -2 && currentGameState != 0 && currentGameState != 13 && currentGameState != 14) {
@@ -2768,6 +2798,7 @@ public final class GameScene {
                     camera.setPerspective(50.0F, (float) MainMenuScreen.scrWidth / (float) MainMenuScreen.scrHeight, 0.1F, 10000.0F);
                 }
                 //
+                updateStaticBotsHeadLookAt();
                 
                 graphics3D.render(gameWorld);
                 graphics3D.releaseTarget();
