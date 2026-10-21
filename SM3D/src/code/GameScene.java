@@ -66,9 +66,16 @@ public final class GameScene {
     //background color [7]
     private static int backgroundColor; //todo remove?
 
-    // Some outdoor rooms use a dark background color, so also detect their Sky* background meshes.
-    private static final int OUTDOOR_SKY_COLOR = 0x4A749F;
+    // Weather is selected by the sky texture used by the room:
+    // texsky3 (Sky3_00.z1) - storm with rain and lightning,
+    // texsky2 (Sky2_00.z1) - light rain,
+    // texsky1 (Sky1_00.z1) - clear weather.
+    private static final int WEATHER_NONE = 0;
+    private static final int WEATHER_LIGHT_RAIN = 1;
+    private static final int WEATHER_STORM = 2;
+
     private static final int RAIN_DROP_COUNT = 56;
+    private static final int LIGHT_RAIN_DROP_COUNT = 24;
     private static final int LIGHTNING_OVERLAY_ROWS = 8;
     private static final Random weatherRandom = new Random();
     private static final int[] rainX = new int[RAIN_DROP_COUNT];
@@ -76,7 +83,8 @@ public final class GameScene {
     private static final int[] rainLength = new int[RAIN_DROP_COUNT];
     private static final int[] rainSpeed = new int[RAIN_DROP_COUNT];
     private static final int[] rainDriftSpeed = new int[RAIN_DROP_COUNT];
-    private static boolean weatherEnabled;
+    private static int weatherMode = WEATHER_NONE;
+    private static int activeRainDropCount;
     private static long rainUpdateTime;
     private static Light lightningLight;
     private static long nextLightningTime = -1L;
@@ -1006,8 +1014,10 @@ public final class GameScene {
 
             gameWorld.removeChild(ambientLight);
             ambientLight = null;
-            gameWorld.removeChild(lightningLight);
-            lightningLight = null;
+            if(lightningLight != null) {
+                gameWorld.removeChild(lightningLight);
+                lightningLight = null;
+            }
             System.gc();
         } catch (Exception var7) {
             var7.printStackTrace();
@@ -1242,32 +1252,41 @@ public final class GameScene {
 
     }
 
-    private static boolean isOutdoorRoom(int roomId) {
-        if((backgroundColor & 0xFFFFFF) == OUTDOOR_SKY_COLOR) return true;
+    private static int getRoomWeatherMode(int roomId) {
+        int mode = WEATHER_NONE;
 
         for(int i = 0; i < bckMeshesCount[roomId]; i++) {
             int modelId = (int) bckMeshSettings[roomId][i][4];
-            if(modelId >= 0 && modelId < objectModelName.length) {
-                String modelName = objectModelName[modelId];
-                if(modelName != null && modelName.indexOf("Sky") != -1) return true;
-            }
+            if(modelId < 0 || modelId >= objectModelName.length) continue;
+
+            String modelName = objectModelName[modelId];
+            if(modelName == null) continue;
+
+            // Sky3_00.z1 is textured with texsky3.png, Sky2_00.z1 with texsky2.png.
+            if(modelName.indexOf("Sky3") != -1) return WEATHER_STORM;
+            if(modelName.indexOf("Sky2") != -1) mode = WEATHER_LIGHT_RAIN;
         }
 
-        return false;
+        return mode;
     }
 
     private static void configureWeatherForRoom(int roomId) {
-        boolean wasWeatherEnabled = weatherEnabled;
-        weatherEnabled = isOutdoorRoom(roomId);
+        int newWeatherMode = getRoomWeatherMode(roomId);
 
-        if(weatherEnabled) {
-            if(!wasWeatherEnabled) {
+        if(newWeatherMode != weatherMode) {
+            weatherMode = newWeatherMode;
+            resetLightning();
+
+            if(weatherMode != WEATHER_NONE) {
                 resetRainDrops();
-                lightningFlashStartTime = -1L;
-                lightningIntensity = 0.0F;
-                nextLightningTime = gameTimeUnpaused + 7000L + weatherRandom.nextInt(10000);
             }
 
+            if(weatherMode == WEATHER_STORM) {
+                nextLightningTime = gameTimeUnpaused + 7000L + weatherRandom.nextInt(10000);
+            }
+        }
+
+        if(weatherMode == WEATHER_STORM) {
             if(lightningLight == null) {
                 lightningLight = new Light();
                 lightningLight.setMode(Light.AMBIENT);
@@ -1277,13 +1296,18 @@ public final class GameScene {
                 gameWorld.addChild(lightningLight);
             }
         } else {
-            nextLightningTime = -1L;
-            lightningFlashStartTime = -1L;
-            lightningIntensity = 0.0F;
-            if(lightningLight != null) {
-                lightningLight.setIntensity(0.0F);
-                lightningLight.setRenderingEnable(false);
-            }
+            resetLightning();
+        }
+    }
+
+    private static void resetLightning() {
+        nextLightningTime = -1L;
+        lightningFlashStartTime = -1L;
+        lightningIntensity = 0.0F;
+
+        if(lightningLight != null) {
+            lightningLight.setIntensity(0.0F);
+            lightningLight.setRenderingEnable(false);
         }
     }
 
@@ -1291,19 +1315,28 @@ public final class GameScene {
         int width = screenWidth > 0 ? screenWidth : 1;
         int height = screenHeight > 0 ? screenHeight : 1;
 
-        for(int i = 0; i < RAIN_DROP_COUNT; i++) {
-            rainLength[i] = 8 + weatherRandom.nextInt(7);
+        activeRainDropCount = weatherMode == WEATHER_STORM ? RAIN_DROP_COUNT : LIGHT_RAIN_DROP_COUNT;
+
+        for(int i = 0; i < activeRainDropCount; i++) {
+            if(weatherMode == WEATHER_STORM) {
+                rainLength[i] = 8 + weatherRandom.nextInt(7);
+                rainSpeed[i] = 170 + weatherRandom.nextInt(111);
+                rainDriftSpeed[i] = 18 + weatherRandom.nextInt(28);
+            } else {
+                rainLength[i] = 5 + weatherRandom.nextInt(4);
+                rainSpeed[i] = 95 + weatherRandom.nextInt(56);
+                rainDriftSpeed[i] = 8 + weatherRandom.nextInt(12);
+            }
+
             rainX[i] = weatherRandom.nextInt(width);
             rainY[i] = weatherRandom.nextInt(height + rainLength[i]) - rainLength[i];
-            rainSpeed[i] = 170 + weatherRandom.nextInt(111);
-            rainDriftSpeed[i] = 18 + weatherRandom.nextInt(28);
         }
 
         rainUpdateTime = gameTimeUnpaused;
     }
 
     private static void updateWeatherEffects() {
-        if(!weatherEnabled) return;
+        if(weatherMode == WEATHER_NONE) return;
 
         long now = gameTimeUnpaused;
         long elapsed = now - rainUpdateTime;
@@ -1315,7 +1348,7 @@ public final class GameScene {
             int width = screenWidth > 0 ? screenWidth : 1;
             int height = screenHeight > 0 ? screenHeight : 1;
 
-            for(int i = 0; i < RAIN_DROP_COUNT; i++) {
+            for(int i = 0; i < activeRainDropCount; i++) {
                 rainX[i] -= (int) (elapsed * rainDriftSpeed[i] / 1000L);
                 rainY[i] += (int) (elapsed * rainSpeed[i] / 1000L);
 
@@ -1327,25 +1360,29 @@ public final class GameScene {
             }
         }
 
-        if(nextLightningTime < 0L) {
-            nextLightningTime = now + 7000L + weatherRandom.nextInt(10000);
-        }
-        if(lightningFlashStartTime < 0L && now >= nextLightningTime) {
-            lightningFlashStartTime = now;
-            nextLightningTime = now + 9000L + weatherRandom.nextInt(13000);
-        }
+        if(weatherMode != WEATHER_STORM) {
+            lightningIntensity = 0.0F;
+        } else {
+            if(nextLightningTime < 0L) {
+                nextLightningTime = now + 7000L + weatherRandom.nextInt(10000);
+            }
+            if(lightningFlashStartTime < 0L && now >= nextLightningTime) {
+                lightningFlashStartTime = now;
+                nextLightningTime = now + 9000L + weatherRandom.nextInt(13000);
+            }
 
-        if(lightningFlashStartTime >= 0L) {
-            long flashTime = now - lightningFlashStartTime;
-            if(flashTime < 120L) {
-                lightningIntensity = 1.0F - (float) flashTime / 120.0F;
-            } else if(flashTime < 180L) {
-                lightningIntensity = 0.0F;
-            } else if(flashTime < 275L) {
-                lightningIntensity = 0.65F * (1.0F - (float) (flashTime - 180L) / 95.0F);
-            } else {
-                lightningFlashStartTime = -1L;
-                lightningIntensity = 0.0F;
+            if(lightningFlashStartTime >= 0L) {
+                long flashTime = now - lightningFlashStartTime;
+                if(flashTime < 120L) {
+                    lightningIntensity = 1.0F - (float) flashTime / 120.0F;
+                } else if(flashTime < 180L) {
+                    lightningIntensity = 0.0F;
+                } else if(flashTime < 275L) {
+                    lightningIntensity = 0.65F * (1.0F - (float) (flashTime - 180L) / 95.0F);
+                } else {
+                    lightningFlashStartTime = -1L;
+                    lightningIntensity = 0.0F;
+                }
             }
         }
 
@@ -1373,12 +1410,12 @@ public final class GameScene {
     }
 
     private static void drawWeatherEffects(Graphics graphics) {
-        if(!weatherEnabled) return;
+        if(weatherMode == WEATHER_NONE) return;
 
         drawLightningOverlay(graphics);
-        graphics.setColor(lightningIntensity > 0.25F ? 0xD5E3F2 : 0x8FA7B8);
+        graphics.setColor(lightningIntensity > 0.25F ? 0xD5E3F2 : (weatherMode == WEATHER_STORM ? 0x8FA7B8 : 0xAFC4D2));
 
-        for(int i = 0; i < RAIN_DROP_COUNT; i++) {
+        for(int i = 0; i < activeRainDropCount; i++) {
             graphics.drawLine(rainX[i], rainY[i], rainX[i] - 2, rainY[i] + rainLength[i]);
         }
     }
@@ -2681,9 +2718,13 @@ public final class GameScene {
         gameWorld.removeChild(ambientLight);
         ambientLight = null;
         System.gc();
-        gameWorld.removeChild(lightningLight);
-        lightningLight = null;
-        weatherEnabled = false;
+        if(lightningLight != null) {
+            gameWorld.removeChild(lightningLight);
+            lightningLight = null;
+        }
+        weatherMode = WEATHER_NONE;
+        activeRainDropCount = 0;
+        rainUpdateTime = 0L;
         nextLightningTime = -1L;
         lightningFlashStartTime = -1L;
         lightningIntensity = 0.0F;
